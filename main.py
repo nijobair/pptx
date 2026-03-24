@@ -5,8 +5,6 @@ import io
 import json
 import logging
 import time
-import os
-from datetime import datetime
 
 app = FastAPI()
 
@@ -15,11 +13,6 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
 logger = logging.getLogger("pptx-generator-api")
-
-# Create output directory for local cross-reference files
-OUTPUT_DIR = "./generated_decks"
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-logger.info("Output directory for generated files: %s", os.path.abspath(OUTPUT_DIR))
 
 # 1. CORS Configuration: Allow your SPFx web part to communicate with this server
 app.add_middleware(
@@ -106,19 +99,6 @@ async def generate_document(
     output_stream.seek(0)
     output_bytes = output_stream.getvalue()
 
-    # 6.5 Save to local file for cross-referencing
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    search_keyword = metadata.get("currentSearchKeyword", "unknown").replace(" ", "_")
-    local_filename = f"nijobair_{search_keyword}_{timestamp}.pptx"
-    local_filepath = os.path.join(OUTPUT_DIR, local_filename)
-    
-    try:
-        with open(local_filepath, "wb") as f:
-            f.write(output_bytes)
-        logger.info("Local copy saved: %s", local_filepath)
-    except Exception as e:
-        logger.error("Failed to save local copy: %s", str(e))
-
     elapsed_ms = int((time.perf_counter() - started_at) * 1000)
     logger.info("Returning modified presentation. Output size: %s bytes", len(output_bytes))
     logger.info("Request processing completed in %s ms", elapsed_ms)
@@ -133,3 +113,7 @@ async def generate_document(
 @app.get("/")
 async def root():
     return {"message": "Welcome to the PowerPoint Generator API"}
+
+@app.get("/owner")
+async def get_owner():
+    return {"owner": "nijobair"}
