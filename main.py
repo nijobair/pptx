@@ -28,6 +28,33 @@ def delete_slide(prs, index):
     slides = list(xml_slides)
     xml_slides.remove(slides[index])
 
+def normalize_pptx_filename(value):
+    """Return a safe .pptx filename suitable for Content-Disposition."""
+    fallback_name = "generated_deck.pptx"
+
+    if not isinstance(value, str):
+        return fallback_name
+
+    candidate = value.strip()
+    if not candidate:
+        return fallback_name
+
+    # Keep only the final segment if a path-like value is sent.
+    candidate = candidate.split("/")[-1].split("\\")[-1]
+
+    sanitized = "".join(
+        "_" if (char in '<>:"/\\|?*' or ord(char) < 32) else char
+        for char in candidate
+    ).rstrip(" .")
+
+    if not sanitized:
+        return fallback_name
+
+    if not sanitized.lower().endswith(".pptx"):
+        sanitized = f"{sanitized}.pptx"
+
+    return sanitized
+
 @app.post("/generate-document")
 async def generate_document(
     file: UploadFile, 
@@ -40,11 +67,18 @@ async def generate_document(
     # 2. Parse the incoming JSON data
     instructions = json.loads(data)
     variables = instructions.get("variables", {})
+    replacement_variables = dict(variables) if isinstance(variables, dict) else {}
+    # fileName is control metadata and should not be used as a text replacement key.
+    raw_file_name = replacement_variables.pop("fileName", None)
+    if raw_file_name is None:
+        raw_file_name = replacement_variables.get("{{FILE_NAME}}")
+    response_file_name = normalize_pptx_filename(raw_file_name)
     slides_to_remove = instructions.get("deleteSlides", [])
     metadata = instructions.get("metadata", {})
 
     logger.info("Variables count: %s", len(variables))
     logger.info("Slides requested to delete: %s", slides_to_remove)
+    logger.info("Response file name: %s", response_file_name)
     logger.info("Metadata: %s", metadata)
 
     # 3. Read the incoming file (Blob) into server memory
@@ -73,7 +107,7 @@ async def generate_document(
             if shape.has_text_frame:
                 for paragraph in shape.text_frame.paragraphs:
                     for run in paragraph.runs:
-                        for key, value in variables.items():
+                        for key, value in replacement_variables.items():
                             if key in run.text:
                                 run.text = run.text.replace(key, str(value))
                                 replacement_count += 1
@@ -84,7 +118,7 @@ async def generate_document(
                     for cell in row.cells:
                         for paragraph in cell.text_frame.paragraphs:
                             for run in paragraph.runs:
-                                for key, value in variables.items():
+                                for key, value in replacement_variables.items():
                                     if key in run.text:
                                         run.text = run.text.replace(key, str(value))
                                         replacement_count += 1
@@ -107,7 +141,9 @@ async def generate_document(
     return Response(
         content=output_bytes,
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        headers={"Content-Disposition": "attachment; filename=nijobair.pptx"},
+        headers={
+            "Content-Disposition": f'attachment; filename="{response_file_name}"'
+        },
     )
 
 @app.get("/")
